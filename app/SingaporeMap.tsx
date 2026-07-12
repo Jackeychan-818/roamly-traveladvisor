@@ -15,6 +15,8 @@ type SingaporeMapProps = {
   stops: MapStop[];
   visibleStopIds: number[];
   activeStopId: number;
+  routeCoordinates?: [number, number][];
+  routeIsLive: boolean;
   locateRequest: number;
   onSelectStop: (id: number) => void;
   onLocationStatus: (status: "loading" | "found" | "error") => void;
@@ -34,13 +36,19 @@ const rasterStyle: maplibregl.StyleSpecification = {
   layers: [{ id: "osm", type: "raster", source: "osm" }],
 };
 
-function routeData(stops: MapStop[]): GeoJSON.Feature<GeoJSON.LineString> {
+function routeData(
+  stops: MapStop[],
+  routeCoordinates?: [number, number][],
+): GeoJSON.Feature<GeoJSON.LineString> {
   return {
     type: "Feature",
     properties: {},
     geometry: {
       type: "LineString",
-      coordinates: stops.map((stop) => [stop.longitude, stop.latitude]),
+      coordinates:
+        routeCoordinates && routeCoordinates.length >= 2
+          ? routeCoordinates
+          : stops.map((stop) => [stop.longitude, stop.latitude]),
     },
   };
 }
@@ -49,6 +57,8 @@ export default function SingaporeMap({
   stops,
   visibleStopIds,
   activeStopId,
+  routeCoordinates,
+  routeIsLive,
   locateRequest,
   onSelectStop,
   onLocationStatus,
@@ -84,7 +94,7 @@ export default function SingaporeMap({
     map.on("load", () => {
       map.addSource("itinerary-route", {
         type: "geojson",
-        data: routeData(stops),
+        data: routeData(stops, routeCoordinates),
       });
       map.addLayer({
         id: "itinerary-route-shadow",
@@ -126,8 +136,13 @@ export default function SingaporeMap({
     const source = mapRef.current.getSource("itinerary-route") as
       | GeoJSONSource
       | undefined;
-    source?.setData(routeData(stops));
-  }, [ready, stops]);
+    source?.setData(routeData(stops, routeCoordinates));
+    mapRef.current.setPaintProperty(
+      "itinerary-route-line",
+      "line-dasharray",
+      routeIsLive ? [1, 0] : [1.4, 1.4],
+    );
+  }, [ready, routeCoordinates, routeIsLive, stops]);
 
   useEffect(() => {
     if (!ready || !mapRef.current) return;

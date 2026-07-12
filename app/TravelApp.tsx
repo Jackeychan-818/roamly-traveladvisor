@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import SingaporeMap from "./SingaporeMap";
 
 type Stop = {
@@ -15,6 +15,32 @@ type Stop = {
   longitude: number;
   note: string;
 };
+
+type RouteLeg = {
+  fromId: number;
+  toId: number;
+  durationSeconds: number;
+  distanceMeters: number;
+  coordinates: [number, number][];
+  source: "onemap" | "fallback";
+};
+
+type RoutePlan = {
+  provider: "onemap";
+  mode: "walk";
+  hasFallback: boolean;
+  durationSeconds: number;
+  distanceMeters: number;
+  coordinates: [number, number][];
+  legs: RouteLeg[];
+};
+
+type RouteStatus =
+  | "loading"
+  | "live"
+  | "partial"
+  | "setup"
+  | "error";
 
 const initialStops: Stop[] = [
   {
@@ -81,6 +107,14 @@ const filters = [
   ["nature", "Outdoors"],
 ] as const;
 
+function formatDistance(distanceMeters: number) {
+  if (distanceMeters < 1000) {
+    return `${Math.max(10, Math.round(distanceMeters / 10) * 10)} m`;
+  }
+
+  return `${(distanceMeters / 1000).toFixed(1)} km`;
+}
+
 export default function TravelApp() {
   const [stops, setStops] = useState(initialStops);
   const [activeStop, setActiveStop] = useState(1);
@@ -90,11 +124,64 @@ export default function TravelApp() {
   const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "found" | "error">("idle");
   const [aiOpen, setAiOpen] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [routePlan, setRoutePlan] = useState<RoutePlan | null>(null);
+  const [routeStatus, setRouteStatus] = useState<RouteStatus>("loading");
 
   const visibleStops = useMemo(
     () => stops.filter((stop) => filter === "all" || stop.type === filter),
     [filter, stops],
   );
+  const visibleStopIds = useMemo(
+    () => visibleStops.map((stop) => stop.id),
+    [visibleStops],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadWalkingRoutes() {
+      setRouteStatus("loading");
+
+      try {
+        const response = await fetch("/api/routes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stops: stops.map(({ id, latitude, longitude }) => ({
+              id,
+              latitude,
+              longitude,
+            })),
+          }),
+          signal: controller.signal,
+        });
+        const payload = (await response.json()) as
+          | RoutePlan
+          | { error?: string; code?: string };
+
+        if (!response.ok) {
+          setRoutePlan(null);
+          setRouteStatus(
+            "code" in payload && payload.code === "routing_not_configured"
+              ? "setup"
+              : "error",
+          );
+          return;
+        }
+
+        const plan = payload as RoutePlan;
+        setRoutePlan(plan);
+        setRouteStatus(plan.hasFallback ? "partial" : "live");
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setRoutePlan(null);
+        setRouteStatus("error");
+      }
+    }
+
+    loadWalkingRoutes();
+    return () => controller.abort();
+  }, [stops]);
 
   const replaceStop = (id: number) => {
     setStops((current) =>
@@ -111,12 +198,27 @@ export default function TravelApp() {
       <section className="map-panel" aria-label="Singapore itinerary map">
         <SingaporeMap
           stops={stops}
-          visibleStopIds={visibleStops.map((stop) => stop.id)}
+          visibleStopIds={visibleStopIds}
           activeStopId={activeStop}
+          routeCoordinates={routePlan?.coordinates}
+          routeIsLive={routeStatus === "live"}
           locateRequest={locateRequest}
           onSelectStop={setActiveStop}
           onLocationStatus={setLocationStatus}
         />
+
+        <div className={`route-status route-${routeStatus}`} aria-live="polite">
+          <span />
+          {routeStatus === "loading"
+            ? "Calculating walking routes..."
+            : routeStatus === "live"
+              ? "Live OneMap walking routes"
+              : routeStatus === "partial"
+                ? "Some walking legs are estimated"
+                : routeStatus === "setup"
+                  ? "Add OneMap access for live routes"
+                  : "Walking routes unavailable"}
+        </div>
 
         <header className="topbar">
           <a className="brand" href="#" aria-label="Roamly home">
@@ -201,7 +303,14 @@ export default function TravelApp() {
                 <div className="stop-content">
                   <div className="stop-time">{stop.time} <span>· {stop.duration}</span></div>
                   <h3>{stop.name}</h3>
-                  <p>{stop.area} <span>•</span> {stop.walk}</p>
+                  <p>
+                    {stop.area} <span>•</span>{" "}
+                    {index === 0
+                      ? "Start here"
+                      : routePlan?.legs[index - 1]
+                        ? `${routePlan.legs[index - 1].source === "fallback" ? "~" : ""}${Math.max(1, Math.round(routePlan.legs[index - 1].durationSeconds / 60))} min walk · ${formatDistance(routePlan.legs[index - 1].distanceMeters)}`
+                        : stop.walk}
+                  </p>
                 </div>
                 <button className="swap-button" onClick={(event) => { event.stopPropagation(); replaceStop(stop.id); }} aria-label={`Replace ${stop.name}`}>↻</button>
               </article>
