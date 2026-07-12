@@ -1,87 +1,45 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const developmentPreviewMeta =
-  /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-const templateRoot = new URL("../", import.meta.url);
-const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
+const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
-}
-
-test("server-renders the starter loading skeleton", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
-  const html = await response.text();
-  assert.match(html, developmentPreviewMeta);
-  assert.match(html, /<title>Your site is taking shape<\/title>/i);
-  assert.match(html, /Codex is working/);
-  assert.match(html, /Your site is taking shape/);
-  assert.match(html, /Codex is building the first version/);
-  assert.match(html, /react-loading-skeleton/);
-  assert.match(html, /role="status"/);
-});
-
-test("keeps the loading skeleton scoped and disposable", async () => {
-  const [preview, css, page, layout, packageJson, files] = await Promise.all([
-    readFile(new URL("SkeletonPreview.tsx", previewRoot), "utf8"),
-    readFile(new URL("preview.css", previewRoot), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readdir(previewRoot),
+test("keeps itinerary pins fixed when a stop is selected", async () => {
+  const [map, css] = await Promise.all([
+    source("app/SingaporeMap.tsx"),
+    source("app/globals.css"),
   ]);
 
-  assert.deepEqual(files.sort(), ["SkeletonPreview.tsx", "preview.css"]);
-  assert.match(preview, /from "react-loading-skeleton"/);
-  assert.match(preview, /baseColor="#eceae7"/);
-  assert.match(preview, /highlightColor="#f9f8f6"/);
-  assert.match(preview, /duration=\{2\.8\}/);
-  assert.match(preview, /sites-skeleton-search-placeholder/);
-  assert.match(packageJson, /"react-loading-skeleton": "3\.5\.0"/);
-
-  const shellIndex = preview.indexOf('className="sites-skeleton-shell"');
-  const statusIndex = preview.indexOf('className="sites-skeleton-status"');
-  assert.ok(shellIndex >= 0 && statusIndex > shellIndex);
-  assert.match(css, /position:\s*fixed/);
-  assert.match(css, /inset:\s*0/);
-  assert.match(css, /opacity:\s*0\.52/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.doesNotMatch(css, /#020617|canvas|pets|progress/i);
-  assert.doesNotMatch(
-    preview,
-    /loading-spinner|status-mark|status-progress|canvas|cookie|random/i,
+  assert.doesNotMatch(map, /GeoJSONSource|itinerary-route|routeCoordinates/);
+  assert.equal(
+    (map.match(/\.easeTo\(/g) ?? []).length,
+    1,
+    "Only the explicit Use my location action may move the map",
   );
 
-  assert.match(page, /export const metadata:\s*Metadata/);
-  assert.match(page, /"codex-preview": "development"/);
-  assert.match(page, /<SkeletonPreview \/>/);
-  assert.match(layout, /title:\s*"Starter Project"/);
-  assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
-  assert.doesNotMatch(css, /(^|\s)(html|body)\s*\{/m);
+  const activePinRule = css.match(/\.real-map-pin\.is-active\s*\{([^}]+)\}/)?.[1];
+  assert.ok(activePinRule, "Expected a visible active-pin treatment");
+  assert.doesNotMatch(activePinRule, /scale|transform/);
+  assert.match(activePinRule, /box-shadow/);
+});
 
-  await assert.rejects(
-    access(new URL("public/_sites-preview", templateRoot)),
-  );
+test("ships the Singapore taste-personalization prototype", async () => {
+  const [travelApp, panel, recommendationLogic, places] = await Promise.all([
+    source("app/TravelApp.tsx"),
+    source("app/personalization/TastePanel.tsx"),
+    source("app/personalization/recommend.ts"),
+    source("app/data/places.ts"),
+  ]);
+
+  assert.equal((places.match(/^\s+id: "/gm) ?? []).length, 24);
+  assert.match(travelApp, /roamly:taste-profile/);
+  assert.match(travelApp, /<TastePanel/);
+  assert.match(panel, /Teach Roamly what feels good/);
+  assert.match(panel, /Build my recommendations/);
+  assert.match(recommendationLogic, /"Best match"/);
+  assert.match(recommendationLogic, /"Easy choice"/);
+  assert.match(recommendationLogic, /"Something different"/);
+  assert.match(recommendationLogic, /normalized === "local life" \? "local"/);
+  assert.match(recommendationLogic, /profile\.localReasons/);
+  assert.match(travelApp, /onLocationFound=\{setUserLocation\}/);
 });

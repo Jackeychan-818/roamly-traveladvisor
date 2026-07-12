@@ -1,6 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { singaporePlaces } from "./data/places";
+import TastePanel from "./personalization/TastePanel";
+import { recommendPlaces } from "./personalization/recommend";
+import {
+  interestOptions,
+  tasteReasonOptions,
+  type TasteProfile,
+} from "./personalization/types";
 import SingaporeMap from "./SingaporeMap";
 
 type Stop = {
@@ -34,13 +42,6 @@ type RoutePlan = {
   coordinates: [number, number][];
   legs: RouteLeg[];
 };
-
-type RouteStatus =
-  | "loading"
-  | "live"
-  | "partial"
-  | "setup"
-  | "error";
 
 const initialStops: Stop[] = [
   {
@@ -107,12 +108,79 @@ const filters = [
   ["nature", "Outdoors"],
 ] as const;
 
+const tasteStorageKeys = {
+  profile: "roamly:taste-profile",
+  savedPlaces: "roamly:saved-places",
+  dismissedPlaces: "roamly:dismissed-places",
+} as const;
+
 function formatDistance(distanceMeters: number) {
   if (distanceMeters < 1000) {
     return `${Math.max(10, Math.round(distanceMeters / 10) * 10)} m`;
   }
 
   return `${(distanceMeters / 1000).toFixed(1)} km`;
+}
+
+function readStoredProfile(value: string | null): TasteProfile | null {
+  if (!value) return null;
+
+  try {
+    const profile = JSON.parse(value) as Partial<TasteProfile>;
+    const localReasons = profile.localReasons ?? [];
+    const allowedReasons = tasteReasonOptions as readonly string[];
+    const allowedInterests = interestOptions as readonly string[];
+    if (
+      typeof profile.favoritePlace !== "string" ||
+      !profile.favoritePlace.trim() ||
+      !Array.isArray(profile.reasons) ||
+      profile.reasons.length === 0 ||
+      !profile.reasons.every(
+        (reason) =>
+          typeof reason === "string" && allowedReasons.includes(reason),
+      ) ||
+      typeof profile.localPlace !== "string" ||
+      (profile.localRelationship !== "love" && profile.localRelationship !== "want") ||
+      !Array.isArray(localReasons) ||
+      !localReasons.every(
+        (reason) =>
+          typeof reason === "string" && allowedReasons.includes(reason),
+      ) ||
+      !Array.isArray(profile.interests) ||
+      !profile.interests.every(
+        (interest) =>
+          typeof interest === "string" && allowedInterests.includes(interest),
+      ) ||
+      !["slow", "balanced", "packed"].includes(profile.pace ?? "") ||
+      !["free", "value", "flexible"].includes(profile.budget ?? "")
+    ) {
+      return null;
+    }
+
+    return { ...profile, localReasons } as TasteProfile;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredIds(value: string | null) {
+  if (!value) return [];
+  try {
+    const ids = JSON.parse(value) as unknown;
+    return Array.isArray(ids)
+      ? ids.filter((id): id is string => typeof id === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function storeJson(key: string, value: unknown) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Personalization still works for the current session if storage is blocked.
+  }
 }
 
 export default function TravelApp() {
@@ -125,7 +193,14 @@ export default function TravelApp() {
   const [aiOpen, setAiOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [routePlan, setRoutePlan] = useState<RoutePlan | null>(null);
-  const [routeStatus, setRouteStatus] = useState<RouteStatus>("loading");
+  const [tasteProfile, setTasteProfile] = useState<TasteProfile | null>(null);
+  const [tastePanelMode, setTastePanelMode] = useState<"profile" | "recommendations" | null>(null);
+  const [savedPlaceIds, setSavedPlaceIds] = useState<string[]>([]);
+  const [dismissedPlaceIds, setDismissedPlaceIds] = useState<string[]>([]);
+  const [userLocation, setUserLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
 
   const visibleStops = useMemo(
     () => stops.filter((stop) => filter === "all" || stop.type === filter),
@@ -135,13 +210,66 @@ export default function TravelApp() {
     () => visibleStops.map((stop) => stop.id),
     [visibleStops],
   );
+  const active = stops.find((stop) => stop.id === activeStop) ?? stops[0];
+  const recommendationLatitude = userLocation?.latitude ?? active.latitude;
+  const recommendationLongitude = userLocation?.longitude ?? active.longitude;
+  const personalizedRecommendations = useMemo(
+    () =>
+      tasteProfile
+        ? recommendPlaces(
+            singaporePlaces,
+            tasteProfile,
+            {
+              latitude: recommendationLatitude,
+              longitude: recommendationLongitude,
+            },
+            dismissedPlaceIds,
+          )
+        : [],
+    [
+      dismissedPlaceIds,
+      recommendationLatitude,
+      recommendationLongitude,
+      tasteProfile,
+    ],
+  );
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      let storedProfile: TasteProfile | null = null;
+      let storedSavedPlaces: string[] = [];
+      let storedDismissedPlaces: string[] = [];
+
+      try {
+        storedProfile = readStoredProfile(
+          window.localStorage.getItem(tasteStorageKeys.profile),
+        );
+        storedSavedPlaces = readStoredIds(
+          window.localStorage.getItem(tasteStorageKeys.savedPlaces),
+        );
+        storedDismissedPlaces = readStoredIds(
+          window.localStorage.getItem(tasteStorageKeys.dismissedPlaces),
+        );
+      } catch {
+        // Private browsing can block storage; keep the in-memory experience.
+      }
+
+      setTasteProfile(storedProfile);
+      setSavedPlaceIds(storedSavedPlaces);
+      setDismissedPlaceIds(storedDismissedPlaces);
+
+      if (!storedProfile) {
+        setTastePanelMode("profile");
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
 
     async function loadWalkingRoutes() {
-      setRouteStatus("loading");
-
       try {
         const response = await fetch("/api/routes", {
           method: "POST",
@@ -161,21 +289,14 @@ export default function TravelApp() {
 
         if (!response.ok) {
           setRoutePlan(null);
-          setRouteStatus(
-            "code" in payload && payload.code === "routing_not_configured"
-              ? "setup"
-              : "error",
-          );
           return;
         }
 
         const plan = payload as RoutePlan;
         setRoutePlan(plan);
-        setRouteStatus(plan.hasFallback ? "partial" : "live");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setRoutePlan(null);
-        setRouteStatus("error");
       }
     }
 
@@ -191,7 +312,38 @@ export default function TravelApp() {
     );
   };
 
-  const active = stops.find((stop) => stop.id === activeStop) ?? stops[0];
+  const openTastePanel = () => {
+    setAiOpen(false);
+    setTastePanelMode(tasteProfile ? "recommendations" : "profile");
+  };
+
+  const saveTasteProfile = (profile: TasteProfile) => {
+    setTasteProfile(profile);
+    setDismissedPlaceIds([]);
+    storeJson(tasteStorageKeys.profile, profile);
+    storeJson(tasteStorageKeys.dismissedPlaces, []);
+    setTastePanelMode("recommendations");
+  };
+
+  const toggleSavedPlace = (placeId: string) => {
+    setSavedPlaceIds((current) => {
+      const next = current.includes(placeId)
+        ? current.filter((id) => id !== placeId)
+        : [...current, placeId];
+      storeJson(tasteStorageKeys.savedPlaces, next);
+      return next;
+    });
+  };
+
+  const dismissPlace = (placeId: string) => {
+    setDismissedPlaceIds((current) => {
+      const next = [...new Set([...current, placeId])];
+      const safeNext =
+        next.length > singaporePlaces.length - 3 ? [placeId] : next;
+      storeJson(tasteStorageKeys.dismissedPlaces, safeNext);
+      return safeNext;
+    });
+  };
 
   return (
     <main className="app-shell">
@@ -200,25 +352,11 @@ export default function TravelApp() {
           stops={stops}
           visibleStopIds={visibleStopIds}
           activeStopId={activeStop}
-          routeCoordinates={routePlan?.coordinates}
-          routeIsLive={routeStatus === "live"}
           locateRequest={locateRequest}
           onSelectStop={setActiveStop}
           onLocationStatus={setLocationStatus}
+          onLocationFound={setUserLocation}
         />
-
-        <div className={`route-status route-${routeStatus}`} aria-live="polite">
-          <span />
-          {routeStatus === "loading"
-            ? "Calculating walking routes..."
-            : routeStatus === "live"
-              ? "Live OneMap walking routes"
-              : routeStatus === "partial"
-                ? "Some walking legs are estimated"
-                : routeStatus === "setup"
-                  ? "Add OneMap access for live routes"
-                  : "Walking routes unavailable"}
-        </div>
 
         <header className="topbar">
           <a className="brand" href="#" aria-label="Roamly home">
@@ -229,15 +367,15 @@ export default function TravelApp() {
             <button className="icon-button" onClick={() => setSaved(!saved)} aria-label="Save trip">
               {saved ? "♥" : "♡"}
             </button>
-            <button className="avatar" aria-label="Open profile">JC</button>
+            <button className="avatar" onClick={() => setTastePanelMode("profile")} aria-label="Open taste profile">JC</button>
           </div>
         </header>
 
         <div className="search-wrap">
-          <button className="search-box" onClick={() => setAiOpen(true)}>
+          <button className="search-box" onClick={openTastePanel}>
             <span className="spark">✦</span>
-            <span>Ask Roamly to change your plan...</span>
-            <kbd>AI</kbd>
+            <span>Find places based on what you love...</span>
+            <kbd>FOR YOU</kbd>
           </button>
           <div className="filter-row" aria-label="Map filters">
             {filters.map(([value, label]) => (
@@ -304,7 +442,7 @@ export default function TravelApp() {
                   <div className="stop-time">{stop.time} <span>· {stop.duration}</span></div>
                   <h3>{stop.name}</h3>
                   <p>
-                    {stop.area} <span>•</span>{" "}
+                    {stop.area} area <span>•</span>{" "}
                     {index === 0
                       ? "Start here"
                       : routePlan?.legs[index - 1]
@@ -325,11 +463,6 @@ export default function TravelApp() {
           </div>
         )}
 
-        <button className="next-button" onClick={() => setAiOpen(true)}>
-          <span className="spark-circle">✦</span>
-          <span><strong>What should I do next?</strong><small>3 ideas that fit your location and mood</small></span>
-          <span className="chevron">›</span>
-        </button>
       </section>
 
       <nav className="mobile-nav" aria-label="Primary navigation">
@@ -360,6 +493,20 @@ export default function TravelApp() {
             </label>
           </div>
         </div>
+      )}
+
+      {tastePanelMode && (
+        <TastePanel
+          mode={tastePanelMode}
+          profile={tasteProfile}
+          recommendations={personalizedRecommendations}
+          savedPlaceIds={savedPlaceIds}
+          onClose={() => setTastePanelMode(null)}
+          onEditProfile={() => setTastePanelMode("profile")}
+          onSaveProfile={saveTasteProfile}
+          onToggleSave={toggleSavedPlace}
+          onDismiss={dismissPlace}
+        />
       )}
     </main>
   );

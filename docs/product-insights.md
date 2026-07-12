@@ -328,12 +328,12 @@ The main view should contain:
 
 - A full-screen interactive map
 - Numbered itinerary markers
-- Route lines
+- Optional route lines (hidden by default during early usability testing)
 - A day selector
 - A collapsible timeline
 - Food, attraction, nature, and saved-place filters
 - A location button
-- A prominent “What should I do next?” action
+- A single, uncluttered entry point for contextual recommendations
 - Clear marker states for planned, completed, active, suggested, and at-risk
   stops
 
@@ -344,9 +344,23 @@ Current implementation capabilities include:
 - Selectable markers synchronized with the timeline
 - Marker filtering
 - Browser geolocation
-- An itinerary route layer
+- Walking-time and distance metadata for itinerary legs
 - Stop replacement
 - An AI interaction panel
+- Experience-anchor taste onboarding
+- Three explainable, diversified recommendations
+- Local save and dismiss feedback
+
+Interface principle: avoid showing the same AI action in multiple prominent
+places. The map search and mobile AI navigation item are sufficient during the
+prototype stage. Timeline metadata must distinguish neighborhoods from transit
+stations; for example, “Marina Bay area” describes the neighborhood and does
+not imply an MRT station.
+
+Map interaction principle: selecting an itinerary stop should highlight its
+existing marker without recentering, zooming, or resizing the map. Route lines
+are intentionally hidden during early product testing to keep the map visually
+quiet; walking time can remain in the timeline as supporting information.
 
 ## 9. Place data model
 
@@ -495,6 +509,10 @@ Status: integration implemented; awaiting local and hosted OneMap credentials.
 - Add source and verification metadata
 - Add suitability and atmosphere tags
 
+Status: initial 24-place Singapore seed implemented across culture, food,
+nature, design, and view categories. Expand and add verification metadata after
+the recommendation flow is validated.
+
 ### Milestone 4 — personalization
 
 - Experience-anchor onboarding
@@ -502,6 +520,13 @@ Status: integration implemented; awaiting local and hosted OneMap credentials.
 - Hard feasibility filters
 - Transparent scoring
 - Diverse three-choice results
+
+Status: deterministic prototype implemented. Profiles and save/dismiss feedback
+are stored locally. Both favorite-place qualities and the qualities that appeal
+to someone about a place near home feed the taste model. Proximity uses browser
+location after the user explicitly enables it, otherwise the selected itinerary
+stop is the context. Feasibility signals such as opening hours and weather are
+the next layer.
 
 ### Milestone 5 — live place facts
 
