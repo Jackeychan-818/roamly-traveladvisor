@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import SingaporeMap from "./SingaporeMap";
 
 type Stop = {
   id: number;
@@ -10,8 +11,8 @@ type Stop = {
   type: "sight" | "food" | "nature";
   duration: string;
   walk: string;
-  x: number;
-  y: number;
+  latitude: number;
+  longitude: number;
   note: string;
 };
 
@@ -24,8 +25,8 @@ const initialStops: Stop[] = [
     type: "sight",
     duration: "60 min",
     walk: "Start here",
-    x: 39,
-    y: 58,
+    latitude: 1.2816,
+    longitude: 103.8442,
     note: "A calm cultural start, before the late-morning crowds.",
   },
   {
@@ -36,8 +37,8 @@ const initialStops: Stop[] = [
     type: "food",
     duration: "75 min",
     walk: "7 min walk",
-    x: 48,
-    y: 68,
+    latitude: 1.2803,
+    longitude: 103.8446,
     note: "Local lunch choices that fit your casual, budget-friendly style.",
   },
   {
@@ -48,8 +49,8 @@ const initialStops: Stop[] = [
     type: "nature",
     duration: "2 hr",
     walk: "12 min ride",
-    x: 72,
-    y: 54,
+    latitude: 1.2816,
+    longitude: 103.8636,
     note: "The afternoon light is great, with indoor domes if it rains.",
   },
   {
@@ -60,17 +61,17 @@ const initialStops: Stop[] = [
     type: "sight",
     duration: "90 min",
     walk: "15 min ride",
-    x: 62,
-    y: 29,
+    latitude: 1.3023,
+    longitude: 103.8591,
     note: "Independent shops, street art and an easy golden-hour walk.",
   },
 ];
 
-const alternatives: Record<number, Pick<Stop, "name" | "area" | "type" | "duration" | "note">> = {
-  1: { name: "Singapore City Gallery", area: "Tanjong Pagar", type: "sight", duration: "60 min", note: "Air-conditioned, free, and a smart introduction to how Singapore grew." },
-  2: { name: "Amoy Street Food Centre", area: "Telok Ayer", type: "food", duration: "75 min", note: "A more workday-local hawker stop with plenty of budget choices." },
-  3: { name: "ArtScience Museum", area: "Marina Bay", type: "sight", duration: "2 hr", note: "A fully indoor alternative that keeps the rest of your route intact." },
-  4: { name: "National Gallery Singapore", area: "Civic District", type: "sight", duration: "90 min", note: "A slower indoor finish with Southeast Asian art and city views." },
+const alternatives: Record<number, Pick<Stop, "name" | "area" | "type" | "duration" | "note" | "latitude" | "longitude">> = {
+  1: { name: "Singapore City Gallery", area: "Tanjong Pagar", type: "sight", duration: "60 min", latitude: 1.2797, longitude: 103.8451, note: "Air-conditioned, free, and a smart introduction to how Singapore grew." },
+  2: { name: "Amoy Street Food Centre", area: "Telok Ayer", type: "food", duration: "75 min", latitude: 1.2793, longitude: 103.8466, note: "A more workday-local hawker stop with plenty of budget choices." },
+  3: { name: "ArtScience Museum", area: "Marina Bay", type: "sight", duration: "2 hr", latitude: 1.2863, longitude: 103.8593, note: "A fully indoor alternative that keeps the rest of your route intact." },
+  4: { name: "National Gallery Singapore", area: "Civic District", type: "sight", duration: "90 min", latitude: 1.2906, longitude: 103.8514, note: "A slower indoor finish with Southeast Asian art and city views." },
 };
 
 const filters = [
@@ -85,7 +86,8 @@ export default function TravelApp() {
   const [activeStop, setActiveStop] = useState(1);
   const [filter, setFilter] = useState<(typeof filters)[number][0]>("all");
   const [day, setDay] = useState(1);
-  const [located, setLocated] = useState(false);
+  const [locateRequest, setLocateRequest] = useState(0);
+  const [locationStatus, setLocationStatus] = useState<"idle" | "loading" | "found" | "error">("idle");
   const [aiOpen, setAiOpen] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -107,31 +109,14 @@ export default function TravelApp() {
   return (
     <main className="app-shell">
       <section className="map-panel" aria-label="Singapore itinerary map">
-        <div className="map-grid" />
-        <div className="island island-main" />
-        <div className="island island-sentosa" />
-        <span className="water-label">SINGAPORE STRAIT</span>
-        <span className="area-label label-chinatown">Chinatown</span>
-        <span className="area-label label-marina">Marina Bay</span>
-        <span className="area-label label-bugis">Bugis</span>
-
-        <div className="route-line route-one" />
-        <div className="route-line route-two" />
-        <div className="route-line route-three" />
-
-        {visibleStops.map((stop) => (
-          <button
-            className={`map-pin pin-${stop.type} ${activeStop === stop.id ? "is-active" : ""}`}
-            key={stop.id}
-            style={{ left: `${stop.x}%`, top: `${stop.y}%` }}
-            onClick={() => setActiveStop(stop.id)}
-            aria-label={`${stop.id}. ${stop.name}`}
-          >
-            {stop.id}
-          </button>
-        ))}
-
-        {located && <div className="user-location" aria-label="Your location"><span /></div>}
+        <SingaporeMap
+          stops={stops}
+          visibleStopIds={visibleStops.map((stop) => stop.id)}
+          activeStopId={activeStop}
+          locateRequest={locateRequest}
+          onSelectStop={setActiveStop}
+          onLocationStatus={setLocationStatus}
+        />
 
         <header className="topbar">
           <a className="brand" href="#" aria-label="Roamly home">
@@ -161,9 +146,19 @@ export default function TravelApp() {
           </div>
         </div>
 
-        <button className={`locate-button ${located ? "located" : ""}`} onClick={() => setLocated(!located)}>
+        <button
+          className={`locate-button ${locationStatus === "found" ? "located" : ""}`}
+          onClick={() => setLocateRequest((request) => request + 1)}
+          disabled={locationStatus === "loading"}
+        >
           <span className="locate-arrow">⌖</span>
-          {located ? "You’re near Chinatown" : "Use my location"}
+          {locationStatus === "loading"
+            ? "Finding you..."
+            : locationStatus === "found"
+              ? "Location found"
+              : locationStatus === "error"
+                ? "Location unavailable"
+                : "Use my location"}
         </button>
 
         <aside className="desktop-card" aria-live="polite">

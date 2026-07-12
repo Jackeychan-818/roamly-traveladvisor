@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "maplibre-gl/dist/maplibre-gl.css";
 
 :root {
   --ink: #17332d;
@@ -26,25 +27,17 @@ button { color: inherit; }
 
 .app-shell { min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(390px, .75fr); overflow: hidden; }
 .map-panel { min-height: 100dvh; position: relative; overflow: hidden; background: #cfe9e4; }
-.map-grid { position: absolute; inset: 0; opacity: .35; background-image: linear-gradient(rgba(255,255,255,.65) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.65) 1px, transparent 1px); background-size: 46px 46px; transform: rotate(-10deg) scale(1.3); }
-.island { position: absolute; background: #f7f3df; box-shadow: inset 0 0 0 1px rgba(31,107,87,.13); }
-.island-main { width: 86%; height: 66%; left: 6%; top: 15%; border-radius: 58% 42% 48% 52% / 46% 38% 62% 54%; transform: rotate(-6deg); }
-.island-main::before, .island-main::after { content: ""; position: absolute; inset: 9%; border: 2px solid rgba(71,145,111,.18); border-radius: 45%; transform: rotate(8deg); }
-.island-main::after { inset: 25% 12%; border-color: rgba(238,115,89,.14); transform: rotate(-16deg); }
-.island-sentosa { width: 27%; height: 8%; bottom: 9%; left: 36%; border-radius: 50%; transform: rotate(-8deg); }
-.water-label { position: absolute; bottom: 4%; left: 9%; color: rgba(31,107,87,.38); letter-spacing: .22em; font-size: 11px; font-weight: 700; }
-.area-label { position: absolute; color: rgba(23,51,45,.42); font-size: 12px; font-weight: 700; letter-spacing: .04em; }
-.label-chinatown { left: 29%; top: 65%; }.label-marina { left: 69%; top: 64%; }.label-bugis { left: 64%; top: 20%; }
-
-.route-line { position: absolute; z-index: 2; height: 4px; transform-origin: left center; border-top: 3px dashed rgba(31,107,87,.65); }
-.route-one { left: 40%; top: 59%; width: 13%; transform: rotate(35deg); }
-.route-two { left: 49%; top: 68%; width: 27%; transform: rotate(-31deg); }
-.route-three { left: 72%; top: 54%; width: 29%; transform: rotate(-98deg); }
-.map-pin { position: absolute; z-index: 4; width: 38px; height: 38px; transform: translate(-50%, -50%); border: 3px solid white; border-radius: 50% 50% 50% 12%; rotate: -45deg; box-shadow: 0 7px 20px rgba(23,51,45,.23); color: white; font-weight: 800; cursor: pointer; transition: transform .2s, box-shadow .2s; }
-.map-pin::first-letter { rotate: 45deg; }
-.map-pin { text-indent: 0; }
-.map-pin.is-active { transform: translate(-50%, -50%) scale(1.22); box-shadow: 0 9px 25px rgba(23,51,45,.36); }
-.map-pin.pin-sight { background: var(--green); }.map-pin.pin-food { background: var(--coral); }.map-pin.pin-nature { background: #7e9e40; }
+.singapore-map { position: absolute; inset: 0; }
+.singapore-map .maplibregl-canvas { cursor: grab; }
+.singapore-map .maplibregl-canvas:active { cursor: grabbing; }
+.maplibregl-ctrl-top-right { top: 74px; right: 14px; }
+.maplibregl-ctrl-group { overflow: hidden; border: 0 !important; border-radius: 12px !important; box-shadow: 0 6px 20px rgba(23,51,45,.16) !important; }
+.maplibregl-ctrl-attrib { border-radius: 8px 0 0 0; font-size: 10px; }
+.real-map-pin { display: grid; place-items: center; width: 38px; height: 38px; border: 3px solid white; border-radius: 50% 50% 50% 12%; transform: rotate(-45deg); box-shadow: 0 7px 20px rgba(23,51,45,.28); color: white; font-weight: 850; cursor: pointer; transition: scale .2s, box-shadow .2s; }
+.real-map-pin > span { transform: rotate(45deg); }
+.real-map-pin.is-active { scale: 1.25; box-shadow: 0 9px 25px rgba(23,51,45,.38); }
+.real-map-pin.pin-sight { background: var(--green); }.real-map-pin.pin-food { background: var(--coral); }.real-map-pin.pin-nature { background: #7e9e40; }
+.real-user-location { width: 23px; height: 23px; border: 4px solid white; border-radius: 50%; background: #2f7ee5; box-shadow: 0 0 0 10px rgba(47,126,229,.2); animation: pulse 2s infinite; }
 
 .topbar { position: absolute; z-index: 8; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 24px 28px; }
 .brand { display: flex; gap: 10px; align-items: center; text-decoration: none; font-size: 22px; font-weight: 850; letter-spacing: -.04em; }
@@ -63,8 +56,6 @@ button { color: inherit; }
 .filter-row button.selected { background: var(--ink); color: white; }
 .locate-button { position: absolute; z-index: 6; left: 28px; bottom: 28px; border: 0; border-radius: 99px; background: white; padding: 12px 17px; box-shadow: 0 8px 25px rgba(23,51,45,.17); font-weight: 750; cursor: pointer; }
 .locate-button.located { background: var(--ink); color: white; }.locate-arrow { margin-right: 7px; font-size: 18px; }
-.user-location { position: absolute; z-index: 5; left: 35%; top: 61%; width: 26px; height: 26px; border-radius: 50%; border: 2px solid white; background: #2f7ee5; box-shadow: 0 0 0 10px rgba(47,126,229,.17); animation: pulse 2s infinite; }
-.user-location span { display: block; width: 5px; height: 5px; margin: 8px; border-radius: 50%; background: white; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 17px rgba(47,126,229,.08); } }
 
 .desktop-card { position: absolute; z-index: 7; right: 28px; bottom: 28px; width: min(325px, calc(100% - 56px)); background: rgba(255,254,249,.95); backdrop-filter: blur(16px); border-radius: 22px; padding: 22px; box-shadow: 0 18px 50px rgba(23,51,45,.18); }
@@ -117,7 +108,8 @@ button { color: inherit; }
   .next-button { position: fixed; right: 14px; bottom: 75px; min-width: 0; width: calc(100% - 28px); max-width: none; }
   .mobile-nav { position: fixed; z-index: 20; display: grid; grid-template-columns: repeat(4, 1fr); left: 0; right: 0; bottom: 0; min-height: 67px; padding: 7px 7px max(7px, env(safe-area-inset-bottom)); background: rgba(255,254,249,.97); backdrop-filter: blur(18px); border-top: 1px solid var(--line); }
   .mobile-nav button { border: 0; background: transparent; display: flex; flex-direction: column; align-items: center; gap: 3px; color: #81918c; font-size: 9px; font-weight: 750; cursor: pointer; }.mobile-nav button span { font-size: 19px; }.mobile-nav button.active { color: var(--green); }
-  .route-line { transform-origin: left; }.route-three { width: 22%; }.island-main { width: 105%; left: -3%; }.area-label { font-size: 10px; }
+  .maplibregl-ctrl-top-right { top: 132px; right: 6px; }
+  .maplibregl-ctrl-top-right .maplibregl-ctrl-group { transform: scale(.9); transform-origin: top right; }
 }
 
 @media (max-width: 420px) {
