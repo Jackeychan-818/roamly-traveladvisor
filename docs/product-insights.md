@@ -118,6 +118,27 @@ Every recommendation should explain why it was selected:
 > hours, within your budget, sheltered from the rain, and similar to places you
 > previously enjoyed.
 
+### 4.4 Trip shape and must-go anchors
+
+Before Roamly fills an itinerary, the traveler should choose the trip length
+and identify any non-negotiable places. Trip length controls the number of real
+day plans; it should not reveal invented weekday or date labels before actual
+dates are collected.
+
+Must-go places are hard planning constraints rather than ordinary preference
+signals:
+
+- Every valid must-go appears exactly once.
+- It is visibly marked and cannot be silently replaced.
+- Anchors are distributed into geographically sensible days.
+- Flexible recommendations fill the remaining time without duplicating an
+  anchor or another scheduled place.
+- Anchor tags influence personalization lightly, while explicit taste and
+  experience memories remain stronger signals.
+
+The first prototype supports one to seven days and stores the trip shape in a
+versioned local profile so it survives refreshes.
+
 ## 5. Experience anchors: personalization from real memories
 
 A strong cold-start signal is a user's own travel experience. Instead of only
@@ -469,15 +490,17 @@ or recommend an unverified business.
 
 The first complete user journey is:
 
-1. The user answers a short preference questionnaire and supplies one or two
+1. The user chooses one to seven days and marks optional must-go places.
+2. The user answers a short preference questionnaire and supplies one or two
    experience anchors.
-2. The user selects a Singapore starting location and available time.
-3. Roamly generates a one-day itinerary.
-4. The itinerary appears as numbered stops on a map and timeline.
-5. The user can remove, reorder, or replace a stop.
-6. The route and schedule recalculate.
-7. During the trip, “What should I do next?” returns three feasible choices.
-8. User feedback updates the preference profile.
+3. The user selects a Singapore starting location and available time.
+4. Roamly generates a populated plan for every selected day.
+5. The itinerary appears as numbered stops on a map and timeline, with
+   must-go places visibly locked.
+6. The user can remove, reorder, or replace flexible stops.
+7. The route and schedule recalculate for the active day.
+8. During the trip, contextual recommendations return three feasible choices.
+9. User feedback updates the preference profile.
 
 Success means a traveler can move from “I do not know what to do” to a credible
 plan in under two minutes.
@@ -528,20 +551,31 @@ location after the user explicitly enables it, otherwise the selected itinerary
 stop is the context. Feasibility signals such as opening hours and weather are
 the next layer.
 
-### Milestone 5 — live place facts
+### Milestone 5 — multi-day trip construction
+
+- One-to-seven-day setup
+- Searchable must-go place selection
+- Hard-anchor distribution and geographic day clustering
+- Populated day tabs without duplicate places
+- Versioned local trip persistence
+
+Status: implemented as a deterministic prototype. Must-go anchors appear once,
+cannot be replaced, and act as a light reference signal for recommendations.
+
+### Milestone 6 — live place facts
 
 - Opening-hours and business-status integration
 - Caching and stale-data handling
 - “Open on arrival” checks
 
-### Milestone 6 — AI assistance
+### Milestone 7 — AI assistance
 
 - Natural-language constraint extraction
 - Structured itinerary operations
 - Recommendation explanations
 - Feedback interpretation
 
-### Milestone 7 — validation
+### Milestone 8 — validation
 
 Test with at least five traveler profiles:
 
@@ -567,15 +601,12 @@ Early validation should measure:
 
 ## 15. Immediate next action
 
-The next implementation action is to activate and test the completed routing
-pipeline:
+The next implementation action is to make each generated day feasible in the
+real world:
 
-1. Register a OneMap account.
-2. Add the OneMap email and password to local and hosted secrets.
-3. Verify automatic token generation and refresh.
-4. Test the current four itinerary stops using walking mode.
-5. Confirm route geometry, distance, and travel time in the interface.
-6. Test expired-token, quota, and no-route fallbacks.
-
-After routing works reliably, build the first curated Singapore place dataset
-and the experience-anchor onboarding flow in parallel.
+1. Collect actual travel dates and a hotel or daily starting point.
+2. Add current opening hours and temporary closure status.
+3. Enforce a daily time budget that includes visits, meals, and travel.
+4. Let users move a must-go place to a different day explicitly.
+5. Activate OneMap credentials and verify walking times for every active day.
+6. Explain whether each flexible stop matches taste or sits near a must-go.

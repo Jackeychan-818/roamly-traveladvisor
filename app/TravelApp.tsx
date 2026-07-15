@@ -7,9 +7,19 @@ import { recommendPlaces } from "./personalization/recommend";
 import {
   interestOptions,
   tasteReasonOptions,
+  type PlaceTag,
+  type SingaporePlace,
   type TasteProfile,
 } from "./personalization/types";
 import SingaporeMap from "./SingaporeMap";
+import {
+  buildTripItinerary,
+  createTripSetup,
+  getAnchorTasteTags,
+  type TripItineraryDay,
+  type TripSetup,
+} from "./trip";
+import TripSetupPanel from "./trip/TripSetupPanel";
 
 type Stop = {
   id: number;
@@ -22,6 +32,9 @@ type Stop = {
   latitude: number;
   longitude: number;
   note: string;
+  placeId: string;
+  source: "must-go" | "recommended";
+  isMustGo: boolean;
 };
 
 type RouteLeg = {
@@ -55,6 +68,9 @@ const initialStops: Stop[] = [
     latitude: 1.2816,
     longitude: 103.8442,
     note: "A calm cultural start, before the late-morning crowds.",
+    placeId: "buddha-tooth-relic-temple",
+    source: "recommended",
+    isMustGo: false,
   },
   {
     id: 2,
@@ -67,6 +83,9 @@ const initialStops: Stop[] = [
     latitude: 1.2803,
     longitude: 103.8446,
     note: "Local lunch choices that fit your casual, budget-friendly style.",
+    placeId: "maxwell-food-centre",
+    source: "recommended",
+    isMustGo: false,
   },
   {
     id: 3,
@@ -79,6 +98,9 @@ const initialStops: Stop[] = [
     latitude: 1.2816,
     longitude: 103.8636,
     note: "The afternoon light is great, with indoor domes if it rains.",
+    placeId: "gardens-by-the-bay-supertree-grove",
+    source: "recommended",
+    isMustGo: false,
   },
   {
     id: 4,
@@ -91,15 +113,11 @@ const initialStops: Stop[] = [
     latitude: 1.3023,
     longitude: 103.8591,
     note: "Independent shops, street art and an easy golden-hour walk.",
+    placeId: "haji-lane",
+    source: "recommended",
+    isMustGo: false,
   },
 ];
-
-const alternatives: Record<number, Pick<Stop, "name" | "area" | "type" | "duration" | "note" | "latitude" | "longitude">> = {
-  1: { name: "Singapore City Gallery", area: "Tanjong Pagar", type: "sight", duration: "60 min", latitude: 1.2797, longitude: 103.8451, note: "Air-conditioned, free, and a smart introduction to how Singapore grew." },
-  2: { name: "Amoy Street Food Centre", area: "Telok Ayer", type: "food", duration: "75 min", latitude: 1.2793, longitude: 103.8466, note: "A more workday-local hawker stop with plenty of budget choices." },
-  3: { name: "ArtScience Museum", area: "Marina Bay", type: "sight", duration: "2 hr", latitude: 1.2863, longitude: 103.8593, note: "A fully indoor alternative that keeps the rest of your route intact." },
-  4: { name: "National Gallery Singapore", area: "Civic District", type: "sight", duration: "90 min", latitude: 1.2906, longitude: 103.8514, note: "A slower indoor finish with Southeast Asian art and city views." },
-};
 
 const filters = [
   ["all", "All"],
@@ -113,6 +131,8 @@ const tasteStorageKeys = {
   savedPlaces: "roamly:saved-places",
   dismissedPlaces: "roamly:dismissed-places",
 } as const;
+
+const tripStorageKey = "roamly:trip-v1";
 
 function formatDistance(distanceMeters: number) {
   if (distanceMeters < 1000) {
@@ -183,8 +203,108 @@ function storeJson(key: string, value: unknown) {
   }
 }
 
+function readStoredTripSetup(value: string | null): TripSetup | null {
+  if (!value) return null;
+
+  try {
+    const candidate = JSON.parse(value) as {
+      version?: unknown;
+      dayCount?: unknown;
+      mustGoPlaceIds?: unknown;
+    };
+    if (
+      candidate.version !== 1 ||
+      typeof candidate.dayCount !== "number" ||
+      !Array.isArray(candidate.mustGoPlaceIds)
+    ) {
+      return null;
+    }
+
+    const knownPlaceIds = new Set(singaporePlaces.map((place) => place.id));
+    const mustGoPlaceIds = candidate.mustGoPlaceIds.filter(
+      (id): id is string => typeof id === "string" && knownPlaceIds.has(id),
+    );
+    return createTripSetup(candidate.dayCount, mustGoPlaceIds);
+  } catch {
+    return null;
+  }
+}
+
+function placeType(place: SingaporePlace): Stop["type"] {
+  if (place.category === "food") return "food";
+  if (place.category === "nature") return "nature";
+  return "sight";
+}
+
+function durationLabel(minutes: number) {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes
+    ? `${hours} hr ${remainingMinutes} min`
+    : `${hours} hr`;
+}
+
+function timeLabel(minutesAfterMidnight: number) {
+  if (minutesAfterMidnight >= 21 * 60) return "Flexible";
+  const hours = Math.floor(minutesAfterMidnight / 60);
+  const minutes = minutesAfterMidnight % 60;
+  const suffix = hours >= 12 ? "PM" : "AM";
+  const displayHours = hours % 12 || 12;
+  return `${displayHours}:${String(minutes).padStart(2, "0")} ${suffix}`;
+}
+
+function itineraryDayToStops(day: TripItineraryDay): Stop[] {
+  const mustGoNames = day.stops
+    .filter((stop) => stop.source === "must-go")
+    .map((stop) => stop.place.name);
+  let nextStartMinutes = 9 * 60 + 30;
+
+  return day.stops.map(({ place, source }, index) => {
+    const startTime = timeLabel(nextStartMinutes);
+    nextStartMinutes += place.typicalDurationMinutes + 30;
+
+    return {
+      id: index + 1,
+      time: startTime,
+      name: place.name,
+      area: place.area,
+      type: placeType(place),
+      duration: durationLabel(place.typicalDurationMinutes),
+      walk: index === 0 ? "Start here" : "Route updating",
+      latitude: place.latitude,
+      longitude: place.longitude,
+      note:
+        source === "must-go"
+          ? "Locked into this day because you marked it as a must-go place."
+          : mustGoNames.length
+            ? `Chosen as a nearby complement to ${mustGoNames[0]}.`
+            : place.summary,
+      placeId: place.id,
+      source,
+      isMustGo: source === "must-go",
+    };
+  });
+}
+
+function buildStopPlans(setup: TripSetup, profile: TasteProfile | null) {
+  const anchorTags = getAnchorTasteTags(
+    singaporePlaces,
+    setup.mustGoPlaceIds,
+  );
+  const preferredTags: PlaceTag[] = [
+    ...(profile?.reasons ?? []),
+    ...(profile?.interests ?? []),
+    ...(profile?.localReasons ?? []),
+    ...anchorTags,
+  ];
+  return buildTripItinerary(singaporePlaces, setup, preferredTags).days.map(
+    itineraryDayToStops,
+  );
+}
+
 export default function TravelApp() {
-  const [stops, setStops] = useState(initialStops);
+  const [dayPlans, setDayPlans] = useState<Stop[][]>([initialStops]);
   const [activeStop, setActiveStop] = useState(1);
   const [filter, setFilter] = useState<(typeof filters)[number][0]>("all");
   const [day, setDay] = useState(1);
@@ -201,7 +321,13 @@ export default function TravelApp() {
     latitude: number;
     longitude: number;
   } | null>(null);
+  const [tripSetup, setTripSetup] = useState<TripSetup | null>(null);
+  const [tripSetupDraft, setTripSetupDraft] = useState<TripSetup>(
+    createTripSetup(3),
+  );
+  const [tripSetupOpen, setTripSetupOpen] = useState(false);
 
+  const stops = dayPlans[day - 1] ?? dayPlans[0] ?? initialStops;
   const visibleStops = useMemo(
     () => stops.filter((stop) => filter === "all" || stop.type === filter),
     [filter, stops],
@@ -210,7 +336,20 @@ export default function TravelApp() {
     () => visibleStops.map((stop) => stop.id),
     [visibleStops],
   );
-  const active = stops.find((stop) => stop.id === activeStop) ?? stops[0];
+  const active =
+    stops.find((stop) => stop.id === activeStop) ?? stops[0] ?? initialStops[0];
+  const mustGoPlaceIds = useMemo(
+    () => tripSetup?.mustGoPlaceIds ?? [],
+    [tripSetup],
+  );
+  const anchorTasteTags = useMemo(
+    () => getAnchorTasteTags(singaporePlaces, mustGoPlaceIds),
+    [mustGoPlaceIds],
+  );
+  const scheduledPlaceIds = useMemo(
+    () => dayPlans.flatMap((plan) => plan.map((stop) => stop.placeId)),
+    [dayPlans],
+  );
   const recommendationLatitude = userLocation?.latitude ?? active.latitude;
   const recommendationLongitude = userLocation?.longitude ?? active.longitude;
   const personalizedRecommendations = useMemo(
@@ -223,13 +362,16 @@ export default function TravelApp() {
               latitude: recommendationLatitude,
               longitude: recommendationLongitude,
             },
-            dismissedPlaceIds,
+            [...dismissedPlaceIds, ...scheduledPlaceIds],
+            anchorTasteTags,
           )
         : [],
     [
       dismissedPlaceIds,
+      anchorTasteTags,
       recommendationLatitude,
       recommendationLongitude,
+      scheduledPlaceIds,
       tasteProfile,
     ],
   );
@@ -237,6 +379,7 @@ export default function TravelApp() {
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       let storedProfile: TasteProfile | null = null;
+      let storedTripSetup: TripSetup | null = null;
       let storedSavedPlaces: string[] = [];
       let storedDismissedPlaces: string[] = [];
 
@@ -250,6 +393,9 @@ export default function TravelApp() {
         storedDismissedPlaces = readStoredIds(
           window.localStorage.getItem(tasteStorageKeys.dismissedPlaces),
         );
+        storedTripSetup = readStoredTripSetup(
+          window.localStorage.getItem(tripStorageKey),
+        );
       } catch {
         // Private browsing can block storage; keep the in-memory experience.
       }
@@ -257,8 +403,16 @@ export default function TravelApp() {
       setTasteProfile(storedProfile);
       setSavedPlaceIds(storedSavedPlaces);
       setDismissedPlaceIds(storedDismissedPlaces);
+      setTripSetup(storedTripSetup);
 
-      if (!storedProfile) {
+      if (storedTripSetup) {
+        setTripSetupDraft(storedTripSetup);
+        setDayPlans(buildStopPlans(storedTripSetup, storedProfile));
+      } else {
+        setTripSetupOpen(true);
+      }
+
+      if (storedTripSetup && !storedProfile) {
         setTastePanelMode("profile");
       }
     });
@@ -270,30 +424,56 @@ export default function TravelApp() {
     const controller = new AbortController();
 
     async function loadWalkingRoutes() {
-      try {
-        const response = await fetch("/api/routes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stops: stops.map(({ id, latitude, longitude }) => ({
-              id,
-              latitude,
-              longitude,
-            })),
-          }),
-          signal: controller.signal,
-        });
-        const payload = (await response.json()) as
-          | RoutePlan
-          | { error?: string; code?: string };
+      if (stops.length < 2) return;
 
-        if (!response.ok) {
-          setRoutePlan(null);
-          return;
+      try {
+        const chunks: Stop[][] = [];
+        for (let start = 0; start < stops.length - 1; start += 9) {
+          chunks.push(stops.slice(start, start + 10));
         }
 
-        const plan = payload as RoutePlan;
-        setRoutePlan(plan);
+        const plans = await Promise.all(
+          chunks.map(async (chunk) => {
+            const response = await fetch("/api/routes", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                stops: chunk.map(({ id, latitude, longitude }) => ({
+                  id,
+                  latitude,
+                  longitude,
+                })),
+              }),
+              signal: controller.signal,
+            });
+            const payload = (await response.json()) as
+              | RoutePlan
+              | { error?: string; code?: string };
+
+            if (!response.ok) {
+              throw new Error("Walking route unavailable");
+            }
+            return payload as RoutePlan;
+          }),
+        );
+
+        setRoutePlan({
+          provider: "onemap",
+          mode: "walk",
+          hasFallback: plans.some((plan) => plan.hasFallback),
+          durationSeconds: plans.reduce(
+            (total, plan) => total + plan.durationSeconds,
+            0,
+          ),
+          distanceMeters: plans.reduce(
+            (total, plan) => total + plan.distanceMeters,
+            0,
+          ),
+          coordinates: plans.flatMap((plan, index) =>
+            index === 0 ? plan.coordinates : plan.coordinates.slice(1),
+          ),
+          legs: plans.flatMap((plan) => plan.legs),
+        });
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         setRoutePlan(null);
@@ -305,14 +485,80 @@ export default function TravelApp() {
   }, [stops]);
 
   const replaceStop = (id: number) => {
-    setStops((current) =>
-      current.map((stop) =>
-        stop.id === id ? { ...stop, ...alternatives[id] } : stop,
-      ),
+    setRoutePlan(null);
+    setDayPlans((current) => {
+      const selectedDay = current[day - 1];
+      const stop = selectedDay?.find((candidate) => candidate.id === id);
+      if (!selectedDay || !stop || stop.isMustGo) return current;
+
+      const scheduledIds = new Set(
+        current.flatMap((plan) => plan.map((candidate) => candidate.placeId)),
+      );
+      const replacement = singaporePlaces
+        .filter((place) => !scheduledIds.has(place.id))
+        .sort((first, second) => {
+          const firstScore =
+            Number(placeType(first) === stop.type) * 2 +
+            Number(first.area === stop.area);
+          const secondScore =
+            Number(placeType(second) === stop.type) * 2 +
+            Number(second.area === stop.area);
+          return secondScore - firstScore || first.id.localeCompare(second.id);
+        })[0];
+      if (!replacement) return current;
+
+      const replacementStop: Stop = {
+        ...itineraryDayToStops({
+          dayNumber: day,
+          stops: [{ place: replacement, source: "recommended" }],
+        })[0],
+        id: stop.id,
+        time: stop.time,
+        walk: stop.walk,
+        note: `A fresh ${replacement.category} alternative that keeps this day geographically sensible.`,
+      };
+
+      return current.map((plan, index) =>
+        index === day - 1
+          ? plan.map((candidate) =>
+              candidate.id === id ? replacementStop : candidate,
+            )
+          : plan,
+      );
+    });
+  };
+
+  const openTripSetup = () => {
+    setTripSetupDraft(
+      tripSetup ?? createTripSetup(Math.max(1, dayPlans.length)),
     );
+    setTripSetupOpen(true);
+  };
+
+  const saveTripSetup = () => {
+    const normalizedSetup = createTripSetup(
+      tripSetupDraft.dayCount,
+      tripSetupDraft.mustGoPlaceIds,
+    );
+    setTripSetup(normalizedSetup);
+    setTripSetupDraft(normalizedSetup);
+    setDayPlans(buildStopPlans(normalizedSetup, tasteProfile));
+    setDay(1);
+    setActiveStop(1);
+    setRoutePlan(null);
+    setTripSetupOpen(false);
+    storeJson(tripStorageKey, { version: 1, ...normalizedSetup });
+
+    if (!tasteProfile) {
+      setTastePanelMode("profile");
+    }
   };
 
   const openTastePanel = () => {
+    if (!tripSetup) {
+      openTripSetup();
+      return;
+    }
     setAiOpen(false);
     setTastePanelMode(tasteProfile ? "recommendations" : "profile");
   };
@@ -322,6 +568,12 @@ export default function TravelApp() {
     setDismissedPlaceIds([]);
     storeJson(tasteStorageKeys.profile, profile);
     storeJson(tasteStorageKeys.dismissedPlaces, []);
+    if (tripSetup) {
+      setDayPlans(buildStopPlans(tripSetup, profile));
+      setDay(1);
+      setActiveStop(1);
+      setRoutePlan(null);
+    }
     setTastePanelMode("recommendations");
   };
 
@@ -406,7 +658,11 @@ export default function TravelApp() {
           <h2>{active.name}</h2>
           <p>{active.note}</p>
           <div className="card-meta"><span>{active.area}</span><span>{active.duration}</span></div>
-          <button onClick={() => replaceStop(active.id)}>Find another like this</button>
+          {active.isMustGo ? (
+            <div className="must-go-card-note">✓ Must-go place</div>
+          ) : (
+            <button onClick={() => replaceStop(active.id)}>Find another like this</button>
+          )}
         </aside>
       </section>
 
@@ -414,23 +670,63 @@ export default function TravelApp() {
         <div className="drag-handle" />
         <div className="plan-heading">
           <div>
-            <span className="eyebrow">YOUR SINGAPORE TRIP</span>
-            <h1>A day made for you</h1>
+            <span className="eyebrow">
+              DAY {day} OF {tripSetup?.dayCount ?? dayPlans.length}
+            </span>
+            <h1>
+              {(tripSetup?.dayCount ?? dayPlans.length) === 1
+                ? "A day made for you"
+                : `${tripSetup?.dayCount ?? dayPlans.length} days made for you`}
+            </h1>
+            <button className="trip-shape-button" onClick={openTripSetup}>
+              {tripSetup?.dayCount ?? dayPlans.length} days
+              <span>•</span>
+              {mustGoPlaceIds.length} must-go
+            </button>
           </div>
-          <button className="more-button" aria-label="More trip options">•••</button>
+          <button className="more-button" onClick={openTripSetup} aria-label="Edit trip length and must-go places">•••</button>
         </div>
 
         <div className="day-tabs" role="tablist" aria-label="Trip days">
-          {[1, 2, 3].map((number) => (
-            <button key={number} role="tab" aria-selected={day === number} className={day === number ? "active" : ""} onClick={() => setDay(number)}>
-              <small>{number === 1 ? "TODAY" : number === 2 ? "MON" : "TUE"}</small>
-              <strong>{number === 1 ? "12" : number === 2 ? "13" : "14"}</strong>
+          {Array.from(
+            { length: tripSetup?.dayCount ?? dayPlans.length },
+            (_, index) => index + 1,
+          ).map((number) => (
+            <button
+              key={number}
+              role="tab"
+              aria-selected={day === number}
+              className={day === number ? "active" : ""}
+              onClick={() => {
+                setDay(number);
+                setActiveStop(1);
+                setRoutePlan(null);
+              }}
+            >
+              <small>DAY</small>
+              <strong>{number}</strong>
             </button>
           ))}
-          <button className="add-day" aria-label="Add a day">＋</button>
+          {(tripSetup?.dayCount ?? dayPlans.length) < 7 && (
+            <button
+              className="add-day"
+              aria-label="Add a day"
+              onClick={() => {
+                setTripSetupDraft(
+                  createTripSetup(
+                    (tripSetup?.dayCount ?? dayPlans.length) + 1,
+                    mustGoPlaceIds,
+                  ),
+                );
+                setTripSetupOpen(true);
+              }}
+            >
+              ＋
+            </button>
+          )}
         </div>
 
-        {day === 1 ? (
+        {stops.length ? (
           <div className="timeline">
             {stops.map((stop, index) => (
               <article className={`stop-row ${activeStop === stop.id ? "active" : ""}`} key={stop.id} onClick={() => setActiveStop(stop.id)}>
@@ -440,7 +736,10 @@ export default function TravelApp() {
                 </div>
                 <div className="stop-content">
                   <div className="stop-time">{stop.time} <span>· {stop.duration}</span></div>
-                  <h3>{stop.name}</h3>
+                  <h3>
+                    <span className="stop-name">{stop.name}</span>
+                    {stop.isMustGo && <span className="must-go-badge">Must go</span>}
+                  </h3>
                   <p>
                     {stop.area} area <span>•</span>{" "}
                     {index === 0
@@ -450,7 +749,11 @@ export default function TravelApp() {
                         : stop.walk}
                   </p>
                 </div>
-                <button className="swap-button" onClick={(event) => { event.stopPropagation(); replaceStop(stop.id); }} aria-label={`Replace ${stop.name}`}>↻</button>
+                {stop.isMustGo ? (
+                  <span className="must-go-lock" aria-label={`${stop.name} is a must-go place`}>★</span>
+                ) : (
+                  <button className="swap-button" onClick={(event) => { event.stopPropagation(); replaceStop(stop.id); }} aria-label={`Replace ${stop.name}`}>↻</button>
+                )}
               </article>
             ))}
           </div>
@@ -458,8 +761,8 @@ export default function TravelApp() {
           <div className="empty-day">
             <span>✦</span>
             <h2>This day is yours</h2>
-            <p>Tell Roamly your mood and we’ll build a route around it.</p>
-            <button onClick={() => setAiOpen(true)}>Plan day {day} with AI</button>
+            <p>Add another must-go or let Roamly suggest a nearby place.</p>
+            <button onClick={openTripSetup}>Adjust this trip</button>
           </div>
         )}
 
@@ -467,7 +770,7 @@ export default function TravelApp() {
 
       <nav className="mobile-nav" aria-label="Primary navigation">
         <button className="active"><span>⌖</span>Explore</button>
-        <button><span>▣</span>Trips</button>
+        <button onClick={openTripSetup}><span>▣</span>Trips</button>
         <button onClick={() => setAiOpen(true)}><span>✦</span>Ask AI</button>
         <button><span>♡</span>Saved</button>
       </nav>
@@ -493,6 +796,33 @@ export default function TravelApp() {
             </label>
           </div>
         </div>
+      )}
+
+      {tripSetupOpen && (
+        <TripSetupPanel
+          days={tripSetupDraft.dayCount}
+          places={singaporePlaces}
+          selectedMustGoIds={tripSetupDraft.mustGoPlaceIds}
+          onDaysChange={(dayCount) =>
+            setTripSetupDraft((current) =>
+              createTripSetup(dayCount, current.mustGoPlaceIds),
+            )
+          }
+          onToggleMustGo={(placeId) =>
+            setTripSetupDraft((current) =>
+              createTripSetup(
+                current.dayCount,
+                current.mustGoPlaceIds.includes(placeId)
+                  ? current.mustGoPlaceIds.filter((id) => id !== placeId)
+                  : [...current.mustGoPlaceIds, placeId],
+              ),
+            )
+          }
+          onContinue={saveTripSetup}
+          onClose={() => setTripSetupOpen(false)}
+          isEditing={Boolean(tripSetup)}
+          canClose={Boolean(tripSetup)}
+        />
       )}
 
       {tastePanelMode && (

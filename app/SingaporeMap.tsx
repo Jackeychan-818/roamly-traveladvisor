@@ -113,6 +113,19 @@ export default function SingaporeMap({
   }, [activeStopId, onSelectStop, ready, stops, visibleStopIds]);
 
   useEffect(() => {
+    if (!ready || !mapRef.current || stops.length === 0) return;
+
+    const bounds = new maplibregl.LngLatBounds();
+    stops.forEach((stop) => bounds.extend([stop.longitude, stop.latitude]));
+    mapRef.current.fitBounds(bounds, {
+      padding: { top: 170, right: 90, bottom: 100, left: 90 },
+      maxZoom: 14.2,
+      duration: 500,
+      essential: true,
+    });
+  }, [ready, stops]);
+
+  useEffect(() => {
     if (!ready || !mapRef.current || locateRequest === 0) return;
 
     if (!navigator.geolocation) {

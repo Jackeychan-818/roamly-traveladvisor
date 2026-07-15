@@ -14,8 +14,9 @@ test("keeps itinerary pins fixed when a stop is selected", async () => {
   assert.equal(
     (map.match(/\.easeTo\(/g) ?? []).length,
     1,
-    "Only the explicit Use my location action may move the map",
+    "Stop selection must not add another easeTo camera action",
   );
+  assert.match(map, /fitBounds\(bounds/);
 
   const activePinRule = css.match(/\.real-map-pin\.is-active\s*\{([^}]+)\}/)?.[1];
   assert.ok(activePinRule, "Expected a visible active-pin treatment");
@@ -42,4 +43,22 @@ test("ships the Singapore taste-personalization prototype", async () => {
   assert.match(recommendationLogic, /normalized === "local life" \? "local"/);
   assert.match(recommendationLogic, /profile\.localReasons/);
   assert.match(travelApp, /onLocationFound=\{setUserLocation\}/);
+});
+
+test("wires multi-day setup and must-go anchors into the app", async () => {
+  const [travelApp, setupPanel, planner] = await Promise.all([
+    source("app/TravelApp.tsx"),
+    source("app/trip/TripSetupPanel.tsx"),
+    source("app/trip/planner.ts"),
+  ]);
+
+  assert.match(travelApp, /roamly:trip-v1/);
+  assert.match(travelApp, /<TripSetupPanel/);
+  assert.match(travelApp, /canClose=\{Boolean\(tripSetup\)\}/);
+  assert.match(travelApp, /start \+= 9/);
+  assert.match(travelApp, /scheduledPlaceIds/);
+  assert.match(setupPanel, /How many days in Singapore\?/);
+  assert.match(setupPanel, /Your must-go places/);
+  assert.match(planner, /buildTripItinerary/);
+  assert.match(planner, /source: "must-go"/);
 });

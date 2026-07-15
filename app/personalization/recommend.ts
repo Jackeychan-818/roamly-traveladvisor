@@ -43,7 +43,10 @@ function distanceKm(
   return radius * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 }
 
-function buildEvidence(profile: TasteProfile) {
+function buildEvidence(
+  profile: TasteProfile,
+  anchorTags: readonly string[] = [],
+) {
   const evidence = new Map<string, number>();
   const add = (values: readonly string[], weight: number) => {
     values.forEach((value) => {
@@ -54,6 +57,7 @@ function buildEvidence(profile: TasteProfile) {
 
   add(profile.reasons, 5);
   add(profile.interests, 2.5);
+  add(anchorTags, 0.75);
 
   // A nearby place the user already loves is demonstrated taste. A wishlist
   // place is aspirational, so its selected qualities influence results gently.
@@ -136,7 +140,10 @@ function score(candidate: RankedPlace, kind: PlaceRecommendation["label"]) {
 }
 
 function matchedTags(place: SingaporePlace, profile: TasteProfile) {
-  const placeTags = new Set(place.tags.map(normalize));
+  const placeTags = new Set([
+    normalize(place.category === "view" ? "views" : place.category),
+    ...place.tags.map(normalize),
+  ]);
   return [...profile.reasons, ...profile.interests]
     .map(normalize)
     .filter((tag, index, tags) => placeTags.has(tag) && tags.indexOf(tag) === index)
@@ -147,20 +154,30 @@ function reasonFor(
   label: PlaceRecommendation["label"],
   place: SingaporePlace,
   profile: TasteProfile,
+  anchorTags: readonly string[] = [],
 ) {
   const matches = matchedTags(place, profile);
   const traits = matches.length === 2 ? `${matches[0]} and ${matches[1]}` : matches[0];
+  const placeTags = new Set([
+    normalize(place.category === "view" ? "views" : place.category),
+    ...place.tags.map(normalize),
+  ]);
+  const anchorTrait = anchorTags.map(normalize).find((tag) => placeTags.has(tag));
   const budgetText = place.priceLevel === 0 ? "It is free to enjoy." : "It fits your budget preference.";
 
   if (label === "Best match") {
-    return traits
-      ? `It echoes the ${traits} you valued at ${profile.favoritePlace}. ${budgetText}`
-      : `Its atmosphere and ${profile.pace} pace make it a strong overall fit. ${budgetText}`;
+    if (traits) {
+      return `It echoes the ${traits} you valued at ${profile.favoritePlace}. ${budgetText}`;
+    }
+    if (anchorTrait) {
+      return `Its ${anchorTrait} character connects with the pattern in your must-go list. ${budgetText}`;
+    }
+    return `Its atmosphere and ${profile.pace} pace make it a strong overall fit. ${budgetText}`;
   }
   if (label === "Easy choice") {
-    return `A convenient ${place.category} stop near your current plan${traits ? ` that still matches your taste for ${traits}` : ""}.`;
+    return `A convenient ${place.category} stop near your current plan${traits ? ` that still matches your taste for ${traits}` : anchorTrait ? ` with the ${anchorTrait} quality in your must-go list` : ""}.`;
   }
-  return `A different ${place.category} experience${traits ? ` with a familiar thread of ${traits}` : ""}—a low-risk way to try something new.`;
+  return `A different ${place.category} experience${traits ? ` with a familiar thread of ${traits}` : anchorTrait ? ` connected by your interest in ${anchorTrait}` : ""}—a low-risk way to try something new.`;
 }
 
 function pickDiverse(
@@ -188,8 +205,9 @@ export function recommendPlaces(
   profile: TasteProfile,
   context: RecommendationContext,
   excludedIds: string[] = [],
+  anchorTags: readonly string[] = [],
 ): PlaceRecommendation[] {
-  const evidence = buildEvidence(profile);
+  const evidence = buildEvidence(profile, anchorTags);
   const excluded = new Set(excludedIds);
   const candidates = places
     .filter((place) => !excluded.has(place.id))
@@ -209,7 +227,7 @@ export function recommendPlaces(
       label,
       place: choice.place,
       score: Math.round(score(choice, label) * 100),
-      reason: reasonFor(label, choice.place, profile),
+      reason: reasonFor(label, choice.place, profile, anchorTags),
     }];
   });
 }
