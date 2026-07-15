@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import maplibregl, { GeoJSONSource, Map, Marker } from "maplibre-gl";
+import maplibregl, { Map, Marker } from "maplibre-gl";
 
 export type MapStop = {
   id: number;
@@ -18,6 +18,10 @@ type SingaporeMapProps = {
   locateRequest: number;
   onSelectStop: (id: number) => void;
   onLocationStatus: (status: "loading" | "found" | "error") => void;
+  onLocationFound: (location: {
+    latitude: number;
+    longitude: number;
+  }) => void;
 };
 
 const rasterStyle: maplibregl.StyleSpecification = {
@@ -34,17 +38,6 @@ const rasterStyle: maplibregl.StyleSpecification = {
   layers: [{ id: "osm", type: "raster", source: "osm" }],
 };
 
-function routeData(stops: MapStop[]): GeoJSON.Feature<GeoJSON.LineString> {
-  return {
-    type: "Feature",
-    properties: {},
-    geometry: {
-      type: "LineString",
-      coordinates: stops.map((stop) => [stop.longitude, stop.latitude]),
-    },
-  };
-}
-
 export default function SingaporeMap({
   stops,
   visibleStopIds,
@@ -52,6 +45,7 @@ export default function SingaporeMap({
   locateRequest,
   onSelectStop,
   onLocationStatus,
+  onLocationFound,
 }: SingaporeMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
@@ -81,34 +75,7 @@ export default function SingaporeMap({
       "bottom-right",
     );
 
-    map.on("load", () => {
-      map.addSource("itinerary-route", {
-        type: "geojson",
-        data: routeData(stops),
-      });
-      map.addLayer({
-        id: "itinerary-route-shadow",
-        type: "line",
-        source: "itinerary-route",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "rgba(255, 255, 255, 0.92)",
-          "line-width": 8,
-        },
-      });
-      map.addLayer({
-        id: "itinerary-route-line",
-        type: "line",
-        source: "itinerary-route",
-        layout: { "line-cap": "round", "line-join": "round" },
-        paint: {
-          "line-color": "#1f6b57",
-          "line-width": 4,
-          "line-dasharray": [1.4, 1.4],
-        },
-      });
-      setReady(true);
-    });
+    map.on("load", () => setReady(true));
 
     mapRef.current = map;
 
@@ -119,15 +86,6 @@ export default function SingaporeMap({
       mapRef.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    if (!ready || !mapRef.current) return;
-
-    const source = mapRef.current.getSource("itinerary-route") as
-      | GeoJSONSource
-      | undefined;
-    source?.setData(routeData(stops));
-  }, [ready, stops]);
 
   useEffect(() => {
     if (!ready || !mapRef.current) return;
@@ -155,18 +113,17 @@ export default function SingaporeMap({
   }, [activeStopId, onSelectStop, ready, stops, visibleStopIds]);
 
   useEffect(() => {
-    if (!ready || !mapRef.current) return;
+    if (!ready || !mapRef.current || stops.length === 0) return;
 
-    const activeStop = stops.find((stop) => stop.id === activeStopId);
-    if (!activeStop) return;
-
-    mapRef.current.easeTo({
-      center: [activeStop.longitude, activeStop.latitude],
-      zoom: 14.2,
-      duration: 650,
+    const bounds = new maplibregl.LngLatBounds();
+    stops.forEach((stop) => bounds.extend([stop.longitude, stop.latitude]));
+    mapRef.current.fitBounds(bounds, {
+      padding: { top: 170, right: 90, bottom: 100, left: 90 },
+      maxZoom: 14.2,
+      duration: 500,
       essential: true,
     });
-  }, [activeStopId, ready, stops]);
+  }, [ready, stops]);
 
   useEffect(() => {
     if (!ready || !mapRef.current || locateRequest === 0) return;
@@ -180,6 +137,11 @@ export default function SingaporeMap({
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
         if (!mapRef.current) return;
+
+        onLocationFound({
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        });
 
         userMarkerRef.current?.remove();
         const marker = document.createElement("div");
@@ -201,7 +163,7 @@ export default function SingaporeMap({
       () => onLocationStatus("error"),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     );
-  }, [locateRequest, onLocationStatus, ready]);
+  }, [locateRequest, onLocationFound, onLocationStatus, ready]);
 
   return <div ref={containerRef} className="singapore-map" />;
 }
